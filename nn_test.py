@@ -5,27 +5,31 @@ Gets to 60.2% test accuracy after 30 epochs
 '''
 
 import numpy as np
-import cv2, os
+import cv2
+import os
+import gc
 from sklearn.model_selection import train_test_split
 from keras.layers import Input, Dense, Activation, Dropout
 from keras.layers.advanced_activations import ReLU
 from keras.models import Model
-np.random.seed(1337) # for reproducibility
 from keras.optimizers import SGD
-import gc
+
+np.random.seed(1337)  # for reproducibility
 
 batch_size = 64
 nb_classes = 2
-nb_epoch = 30
+nb_epoch = 10
 
 
 def paths_list_from_directory(directory):
 
-    subdirs = [x[0] for x in os.walk(directory)]
+    subdirs = next(os.walk(directory))[1]  # takes the immediate children of parent directory
+    print("Sub directories: ", end="")
+    print(*subdirs, sep=", ")
     path_list = []
     for folder in subdirs:
         # loop over files and make a list of tuples with label and path then add to the path list
-        file_names = [os.path.join(directory, folder, y) for y in os.listdir(os.path.join(directory, folder))]
+        file_names = [os.path.join(directory, folder, f) for f in os.listdir(os.path.join(directory, folder))]
         path_list += file_names
 
     return path_list
@@ -41,21 +45,21 @@ def load_image(filename):
         label = 0
 
     # [2] Load the image in greyscale with opencv.
-    image = cv2.imread(filename,cv2.IMREAD_GRAYSCALE)
+    image = cv2.imread(filename, cv2.IMREAD_GRAYSCALE)
 
     height, width = image.shape[:2]
     crop_dim = None
 
-    # [3] Find the dimension that is the smallest between the height and the width and assign it to the crop_drim variable.
+    # [3] Find the dimension that is the smallest between the height and the width and assign it to the crop_drim var
     if height < width:
         crop_dim = (0, 1)
     else:
         crop_dim = (1, 0)
 
     # [4] Crop the centre of the image based on the crop_dim dimension for both the height and width.
-    margin = crop_dim[0] * (height-width)/2 + crop_dim[1] * (width-height)/2
+    margin = int(crop_dim[0] * (height-width)/2 + crop_dim[1] * (width-height)/2)
+    # print("margin size: " + str(margin))
     image = image[(crop_dim[1]*margin):(width - crop_dim[1]*margin),(crop_dim[0]*margin):(height-crop_dim[0]*margin)]
-
 
     # [5] Resize the image to 48 x 48 and divide it with 255.0 to normalise it to floating point format.
     image = cv2.resize(image,(48,48))
@@ -63,45 +67,60 @@ def load_image(filename):
     return image,label
 
 
+# noinspection PyPep8Naming,PyUnusedLocal
 def DataGenerator(img_addrs, img_labels, batch_size, num_classes):
-  while 1:
-    # Ensure randomisation per epoch
-    addrs_labels = list(zip(img_addrs,img_labels))
-    shuffle(addrs_labels)
-    img_addrs, img_labels = zip(*addrs_labels)
 
-    X = []
-    Y = []
+    while 1:
+        # Ensure randomisation per epoch
+        addrs_labels = list(zip(img_addrs,img_labels))
+        shuffle(addrs_labels)
+        img_addrs, img_labels = zip(*addrs_labels)
 
-    count = 0
-
-    for i in range(len(img_addrs)):
-
-      # [1] Call the load_images function and append the image in X.
-        image = load_image(i)
-        X.append(image[0])
-      # [2] Create a one-hot encoding with np.eye and append the one-hot vector to Y.
-        Y.append(np.eye(image[1])) #this isnt the answer
-        count += 1
-
-      # [3] Commpare the count and batch_size (hint: modulo operation) and if so:
-    if not (count % batch_size):
-      #   - Use yield to return X,Y as numpy arrays with types 'float32' and 'uint8' respectively
-        yield np.array(X,dtype = np.float32),np.array(Y, dtype = np.uint8)
-      #   - delete X,Y
-        del X
-        del Y
-      #   - set X,Y to []
         X = []
         Y = []
-      #   - use python garbage collector
-      gc.collect()
+
+        count = 0
+
+        for j in range(len(img_addrs)):
+
+            # [1] Call the load_images function and append the image in X.
+            image = load_image(img_addrs[j])
+            X.append(image[0])
+            # [2] Create a one-hot encoding with np.eye and append the one-hot vector to Y.
+            Y.append(np.eye(num_classes)[image[1]])
+            count += 1
+
+        # [3] Commpare the count and batch_size (hint: modulo operation) and if so:
+        if not (count % batch_size):
+            #   - Use yield to return X,Y as numpy arrays with types 'float32' and 'uint8' respectively
+            yield np.array(X,dtype = np.float32),np.array(Y, dtype = np.uint8)
+            #   - delete X,Y
+            del X
+            del Y
+            #   - set X,Y to []
+            X = []
+            Y = []
+            # garbage collect
+            gc.collect()
 
 
 if __name__ == "__main__":
     paths = paths_list_from_directory('./PetImages')
 
+    for p in paths:
+        try:
+            load_image(p)
+        except AttributeError:
+            print('Invalid Image...Deleting...')
+            os.remove(p)
+        except cv2.error:
+            print('Invalid Image in OpenCV...Deleting...')
+            os.remove(p)
+
+    paths = paths_list_from_directory('./PetImages')
+
     # Use train test split
+    train, val = train_test_split(paths)
 
     X_train = []
     Y_train = []
@@ -130,7 +149,6 @@ if __name__ == "__main__":
     X_train = X_train.reshape(lt, 2304)
     X_val = X_val.reshape(lv, 2304)
 
-
     inputs = Input(shape=(2304,))
     x = inputs
 
@@ -151,16 +169,16 @@ if __name__ == "__main__":
                   loss='categorical_crossentropy',
                   metrics=['accuracy'])
 
-    # model.summary()
-
-
+    model.summary()
 
     history = model.fit(X_train, Y_train,
                     batch_size=batch_size, nb_epoch=nb_epoch,
                     verbose=1, validation_data=(X_val, Y_val))
-    #history = model.fit_generator(DataGenerator(...)...)
+    # history = model.fit_generator(DataGenerator(...)...)
     score = model.evaluate(X_val, Y_val, verbose=0)
-    #history = model.evaluate_generator(DataGenerator(...)...)
+    # history = model.evaluate_generator(DataGenerator(...)...)
 
     print('Test score:', score[0])
     print('Test accuracy:', score[1])
+
+    # Play times! Add something to play with the model.
