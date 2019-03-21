@@ -24,6 +24,8 @@ batch_size = 64
 nb_classes = 2
 nb_epoch = 30
 
+imageDict = dict()
+
 
 def paths_list_from_directory(directory):
 
@@ -40,6 +42,9 @@ def paths_list_from_directory(directory):
 
 
 def load_image(filename):
+
+    if filename in imageDict:
+        return imageDict[filename]
 
     # [1] Get the file category and make the conversion. If 'dog' assign it integer 1, if 'cat' assign it integer 0.
     # check if string 'Dog' is in the path name (in the folder named Dog)
@@ -75,6 +80,8 @@ def load_image(filename):
     # set the image as a float type and divide by 255.0 to normalize
     image.astype(float)
     image = image/255.0
+
+    imageDict[filename] = (image, label)
 
     return image, label
 
@@ -130,6 +137,20 @@ if __name__ == "__main__":
     # pull paths from function and shuffle these before splitting to train and val
     paths = paths_list_from_directory('PetImages')
     np.random.shuffle(paths)
+
+    # pre-load the data to speed up initial epochs
+    total = len(paths)
+    percent = int(total / 100)
+    current = 0
+
+    print("Preloading " + str(total) + " images...")
+    for path in paths:
+        if (current % (percent * 10)) == 0:
+            sys.stdout.write(str(int(current / percent)) + "%...")
+            sys.stdout.flush()
+        load_image(path)
+        current += 1
+    print("done!")
 
     # Use train test split to split to default 0.75 train and 0.25 test
     train, val = train_test_split(paths)
